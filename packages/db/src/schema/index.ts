@@ -58,4 +58,6 @@ export { pluginJobs, pluginJobRuns } from "./plugin_jobs.js";
 export { pluginWebhookDeliveries } from "./plugin_webhooks.js";
 export { pluginLogs } from "./plugin_logs.js";
 export { issueActivities } from "./issue_activities.js";
+export { issueDependencies } from "./issue_dependencies.js";
 export { issueDeliverables } from "./issue_deliverables.js";
+export { subagentSessions } from "./subagent_sessions.js";
