@@ -21,6 +21,9 @@ import { timeAgo } from "../lib/timeAgo";
 import { cn, formatCents } from "../lib/utils";
 import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle } from "lucide-react";
 import { ActiveAgentsPanel } from "../components/ActiveAgentsPanel";
+import { DashboardMetrics } from "../components/DashboardMetrics";
+import { LiveActivityFeed } from "../components/LiveActivityFeed";
+import { AgentStatusBar } from "../components/AgentStatusBar";
 import { ChartCard, RunActivityChart, PriorityChart, IssueStatusChart, SuccessRateChart } from "../components/ActivityCharts";
 import { PageSkeleton } from "../components/PageSkeleton";
 import type { Agent, Issue } from "@paperclipai/shared";
@@ -206,6 +209,10 @@ export function Dashboard() {
         </div>
       )}
 
+      <AgentStatusBar />
+
+      <DashboardMetrics />
+
       <ActiveAgentsPanel companyId={selectedCompanyId!} />
 
       {data && (
@@ -304,6 +311,13 @@ export function Dashboard() {
             className="grid gap-4 md:grid-cols-2"
             itemClassName="rounded-lg border bg-card p-4 shadow-sm"
           />
+
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+              Live Activity
+            </h3>
+            <LiveActivityFeed />
+          </div>
 
           <div className="grid md:grid-cols-2 gap-4">
             {/* Recent Activity */}

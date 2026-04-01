@@ -17,7 +17,8 @@ import { relativeTime, cn, agentRouteRef, agentUrl } from "../lib/utils";
 import { PageTabBar } from "../components/PageTabBar";
 import { Tabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Bot, Plus, List, GitBranch, SlidersHorizontal } from "lucide-react";
+import { DiscoverAgentsDialog } from "../components/DiscoverAgentsDialog";
+import { Bot, Plus, List, GitBranch, SlidersHorizontal, Radar } from "lucide-react";
 import { AGENT_ROLE_LABELS, type Agent } from "@paperclipai/shared";
 
 const adapterLabels: Record<string, string> = {
@@ -77,6 +78,7 @@ export function Agents() {
   const effectiveView: "list" | "org" = forceListView ? "list" : view;
   const [showTerminated, setShowTerminated] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
 
   const { data: agents, isLoading, error } = useQuery({
     queryKey: queryKeys.agents.list(selectedCompanyId!),
@@ -202,11 +204,16 @@ export function Agents() {
               </button>
             </div>
           )}
+          <Button size="sm" variant="outline" onClick={() => setDiscoverOpen(true)}>
+            <Radar className="h-3.5 w-3.5 mr-1.5" />
+            Discover Agents
+          </Button>
           <Button size="sm" variant="outline" onClick={openNewAgent}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />
             New Agent
           </Button>
         </div>
+        <DiscoverAgentsDialog open={discoverOpen} onOpenChange={setDiscoverOpen} />
       </div>
 
       {filtered.length > 0 && (

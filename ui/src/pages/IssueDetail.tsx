@@ -32,6 +32,11 @@ import { IssueDocumentsSection } from "../components/IssueDocumentsSection";
 import { IssueProperties } from "../components/IssueProperties";
 import { IssueWorkspaceCard } from "../components/IssueWorkspaceCard";
 import { LiveRunWidget } from "../components/LiveRunWidget";
+import { PlanningPanel } from "../components/PlanningPanel";
+import { ActivityFeed } from "../components/ActivityFeed";
+import { DeliverablesList } from "../components/DeliverablesList";
+import { IssueDependencies } from "../components/IssueDependencies";
+import { SubAgentTree } from "../components/SubAgentTree";
 import type { MentionOption } from "../components/MarkdownEditor";
 import { ScrollToBottom } from "../components/ScrollToBottom";
 import { StatusIcon } from "../components/StatusIcon";
@@ -62,6 +67,11 @@ import {
   Repeat,
   SlidersHorizontal,
   Trash2,
+  ClipboardList,
+  Package,
+  Link2,
+  GitFork,
+  Lightbulb,
 } from "lucide-react";
 import type { ActivityEvent } from "@paperclipai/shared";
 import type { Agent, Issue, IssueAttachment, IssueComment } from "@paperclipai/shared";
@@ -1223,6 +1233,26 @@ export function IssueDetail() {
             <ActivityIcon className="h-3.5 w-3.5" />
             Activity
           </TabsTrigger>
+          <TabsTrigger value="planning" className="gap-1.5">
+            <Lightbulb className="h-3.5 w-3.5" />
+            Plan
+          </TabsTrigger>
+          <TabsTrigger value="activityFeed" className="gap-1.5">
+            <ClipboardList className="h-3.5 w-3.5" />
+            Activity Feed
+          </TabsTrigger>
+          <TabsTrigger value="deliverables" className="gap-1.5">
+            <Package className="h-3.5 w-3.5" />
+            Deliverables
+          </TabsTrigger>
+          <TabsTrigger value="dependencies" className="gap-1.5">
+            <Link2 className="h-3.5 w-3.5" />
+            Dependencies
+          </TabsTrigger>
+          <TabsTrigger value="subagents" className="gap-1.5">
+            <GitFork className="h-3.5 w-3.5" />
+            Sub-agents
+          </TabsTrigger>
           {issuePluginTabItems.map((item) => (
             <TabsTrigger key={item.value} value={item.value}>
               {item.label}
@@ -1337,6 +1367,26 @@ export function IssueDetail() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="planning">
+          <PlanningPanel issueId={issue.id} />
+        </TabsContent>
+
+        <TabsContent value="activityFeed">
+          <ActivityFeed issueId={issue.id} />
+        </TabsContent>
+
+        <TabsContent value="deliverables">
+          <DeliverablesList issueId={issue.id} />
+        </TabsContent>
+
+        <TabsContent value="dependencies">
+          <IssueDependencies issue={issue} availableIssues={allIssues ?? []} />
+        </TabsContent>
+
+        <TabsContent value="subagents">
+          <SubAgentTree issueId={issue.id} />
         </TabsContent>
 
         {activePluginTab && (
