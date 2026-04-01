@@ -17,3 +17,5 @@ export { accessRoutes } from "./access.js";
 export { instanceSettingsRoutes } from "./instance-settings.js";
 export { planningRoutes } from "./planning.js";
 export { issueTransparencyRoutes } from "./issue-transparency.js";
+export { subagentTrackingRoutes } from "./subagent-tracking.js";
+export { agentDiscoveryRoutes } from "./agent-discovery.js";
