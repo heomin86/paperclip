@@ -57,6 +57,8 @@ export const queryKeys = {
       ["issues", "transparency-activities", issueId, page ?? 0] as const,
     transparencyDeliverables: (issueId: string) =>
       ["issues", "transparency-deliverables", issueId] as const,
+    subagents: (issueId: string) =>
+      ["issues", "subagents", issueId] as const,
   },
   routines: {
     list: (companyId: string) => ["routines", companyId] as const,
@@ -131,6 +133,7 @@ export const queryKeys = {
   heartbeats: (companyId: string, agentId?: string) =>
     ["heartbeats", companyId, agentId] as const,
   runDetail: (runId: string) => ["heartbeat-run", runId] as const,
+  runSubagents: (runId: string) => ["heartbeat-run", runId, "subagents"] as const,
   runWorkspaceOperations: (runId: string) => ["heartbeat-run", runId, "workspace-operations"] as const,
   liveRuns: (companyId: string) => ["live-runs", companyId] as const,
   runIssues: (runId: string) => ["run-issues", runId] as const,
