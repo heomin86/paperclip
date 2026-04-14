@@ -444,8 +444,8 @@ This script lives at `scripts/smoke/openclaw-docker-ui.sh` and automates clone/b
 
 Pairing behavior for this smoke script:
 
-- default `OPENCLAW_DISABLE_DEVICE_AUTH=1` (no Control UI pairing prompt for local smoke; no extra pairing env vars required)
-- set `OPENCLAW_DISABLE_DEVICE_AUTH=0` to require standard device pairing
+- default `OPENCLAW_DISABLE_DEVICE_AUTH=***` (no Control UI pairing prompt for local smoke; no extra pairing env vars required)
+- set `OPENCLAW_DISABLE_DEVICE_AUTH=***` to require standard device pairing
 
 Model behavior for this smoke script:
 
@@ -460,4 +460,69 @@ Networking behavior for this smoke script:
 
 - auto-detects and prints a Paperclip host URL reachable from inside OpenClaw Docker
 - default container-side host alias is `host.docker.internal` (override with `PAPERCLIP_HOST_FROM_CONTAINER` / `PAPERCLIP_HOST_PORT`)
-- if Paperclip rejects container hostnames in authenticated/private mode, allow `host.docker.internal` via `pnpm paperclipai allowed-hostname host.docker.internal` and restart Paperclip
+
+## Testing
+
+### Running Tests
+
+Run the full test suite:
+
+```sh
+pnpm test
+```
+
+Run tests in watch mode:
+
+```sh
+pnpm test:dev
+```
+
+Run tests for a specific package:
+
+```sh
+pnpm test packages/db
+pnpm test server
+```
+
+### PostgreSQL Test Issues
+
+Some tests require embedded PostgreSQL and may be skipped with messages like:
+
+```
+Skipping embedded Postgres migration tests on this host: Failed to initialize embedded PostgreSQL for testing
+```
+
+This commonly occurs when:
+- Another PostgreSQL instance is already running
+- Shared memory limits are too low (macOS)
+- Port conflicts exist
+
+**Quick Fix for Development:**
+Stop existing PostgreSQL during testing:
+
+```sh
+# Homebrew PostgreSQL
+brew services stop postgresql@16
+
+# Run tests
+pnpm test
+
+# Restart PostgreSQL
+brew services start postgresql@16
+```
+
+For detailed troubleshooting and alternative solutions, see [`packages/db/TESTING.md`](../packages/db/TESTING.md).
+
+### Test Coverage
+
+Monitor test coverage and skipped tests:
+
+```sh
+# See summary of passed/skipped tests
+pnpm test 2>&1 | grep -E "(passed|skipped|Tests)"
+
+# Run with coverage (if configured)
+pnpm test --coverage
+```
+
+**Note:** If Paperclip rejects container hostnames in authenticated/private mode, allow `host.docker.internal` via `pnpm paperclipai allowed-hostname host.docker.internal` and restart Paperclip.
