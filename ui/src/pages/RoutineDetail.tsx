@@ -35,6 +35,7 @@ import { ScheduleEditor, describeSchedule } from "../components/ScheduleEditor";
 import { RunButton } from "../components/AgentActionButtons";
 import { getRecentAssigneeIds, sortAgentsByRecency, trackRecentAssignee } from "../lib/recent-assignees";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,13 +49,37 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import type { RoutineTrigger } from "@paperclipai/shared";
+import type { RoutineDetail, RoutineTrigger } from "@paperclipai/shared";
 
 const concurrencyPolicies = ["coalesce_if_active", "always_enqueue", "skip_if_active"];
 const catchUpPolicies = ["skip_missed", "enqueue_missed_with_cap"];
 const triggerKinds = ["schedule", "webhook"];
 const signingModes = ["bearer", "hmac_sha256"];
 const routineTabs = ["triggers", "runs", "activity"] as const;
+const ROUTINE_PAYLOAD_PRESET_KEY = "paperclip:routine:payload-preset";
+const DEFAULT_ROUTINE_PAYLOAD_PRESETS: Record<string, string> = {
+  core_verify: `{
+  "today": "{{today}}",
+  "company_name": "graphrag-memory-ops",
+  "project_name": "{{project_name}}",
+  "workspace_name": "{{workspace_name}}",
+  "graph_scope": "core"
+}`,
+  retrospective: `{
+  "today": "{{today}}",
+  "company_name": "graphrag-memory-ops",
+  "project_name": "{{project_name}}",
+  "workspace_name": "{{workspace_name}}",
+  "graph_scope": "retrospective"
+}`,
+  control_board: `{
+  "today": "{{today}}",
+  "company_name": "graphrag-memory-ops",
+  "project_name": "{{project_name}}",
+  "workspace_name": "{{workspace_name}}",
+  "graph_scope": "control_board"
+}`,
+};
 const concurrencyPolicyDescriptions: Record<string, string> = {
   coalesce_if_active: "Keep one follow-up run queued while an active run is still working.",
   always_enqueue: "Queue every trigger occurrence, even if several runs stack up.",
@@ -76,6 +101,54 @@ type SecretMessage = {
   webhookUrl: string;
   webhookSecret: string;
 };
+
+type ManualOnCompleteDraft = {
+  enabled: boolean;
+  silentCompletion: boolean;
+  issueStatus: "none" | "blocked" | "done";
+  commentBody: string;
+  createIssue: boolean;
+  createIssueTitle: string;
+  createIssueDescription: string;
+  createIssuePriority: "critical" | "high" | "medium" | "low";
+  createIssueCommentBody: string;
+  assignToRoutineAssignee: boolean;
+};
+
+function buildManualOnCompletePayload(
+  routine: RoutineDetail,
+  draft: ManualOnCompleteDraft,
+): Record<string, unknown> | null {
+  if (!draft.enabled) return null;
+
+  const onComplete: Record<string, unknown> = {
+    onlyOn: ["failed", "timed_out"],
+  };
+
+  if (draft.issueStatus !== "none") {
+    onComplete.issueStatus = draft.issueStatus;
+  }
+
+  if (draft.commentBody.trim()) {
+    onComplete.commentBody = draft.commentBody.trim();
+  }
+
+  if (draft.createIssue && draft.createIssueTitle.trim()) {
+    onComplete.createIssue = {
+      title: draft.createIssueTitle.trim(),
+      description: draft.createIssueDescription.trim() || null,
+      status: "todo",
+      priority: draft.createIssuePriority,
+      assignToAgentId: draft.assignToRoutineAssignee ? routine.assigneeAgentId : null,
+      commentBody: draft.createIssueCommentBody.trim() || null,
+    };
+  }
+
+  return {
+    silentCompletion: draft.silentCompletion,
+    onComplete,
+  };
+}
 
 function autoResizeTextarea(element: HTMLTextAreaElement | null) {
   if (!element) return;
@@ -247,6 +320,20 @@ export function RoutineDetail() {
   const projectSelectorRef = useRef<HTMLButtonElement | null>(null);
   const [secretMessage, setSecretMessage] = useState<SecretMessage | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [selectedPayloadPreset, setSelectedPayloadPreset] = useState<string>("core_verify");
+  const [runPayloadDraft, setRunPayloadDraft] = useState(DEFAULT_ROUTINE_PAYLOAD_PRESETS.core_verify);
+  const [manualOnCompleteDraft, setManualOnCompleteDraft] = useState<ManualOnCompleteDraft>({
+    enabled: false,
+    silentCompletion: true,
+    issueStatus: "blocked",
+    commentBody: "수동 실행이 비정상 종료되었습니다. 결과: {outcome}. 후속 이슈: {createdIssueIdentifier}",
+    createIssue: true,
+    createIssueTitle: "",
+    createIssueDescription: "Automatically created because the manual routine run failed or timed out.",
+    createIssuePriority: "high",
+    createIssueCommentBody: "이 이슈는 수동 실행 {runId} 실패 후 자동 생성되었습니다. 부모 이슈: {issueId}",
+    assignToRoutineAssignee: true,
+  });
   const [newTrigger, setNewTrigger] = useState({
     kind: "schedule",
     cronExpression: "0 10 * * *",
@@ -269,6 +356,14 @@ export function RoutineDetail() {
     queryFn: () => routinesApi.get(routineId!),
     enabled: !!routineId,
   });
+
+  useEffect(() => {
+    if (!routine) return;
+    setManualOnCompleteDraft((current) => ({
+      ...current,
+      createIssueTitle: current.createIssueTitle || `Follow-up: ${routine.title}`,
+    }));
+  }, [routine]);
   const activeIssueId = routine?.activeIssue?.id;
   const { data: liveRuns } = useQuery({
     queryKey: queryKeys.issues.liveRuns(activeIssueId!),
@@ -337,6 +432,19 @@ export function RoutineDetail() {
       editDraft.catchUpPolicy !== routineDefaults.catchUpPolicy
     );
   }, [editDraft, routineDefaults]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ROUTINE_PAYLOAD_PRESET_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      if (parsed[selectedPayloadPreset]) {
+        setRunPayloadDraft(parsed[selectedPayloadPreset]);
+      }
+    } catch {
+      // ignore preset storage errors
+    }
+  }, [selectedPayloadPreset]);
 
   useEffect(() => {
     if (!routine) return;
@@ -409,7 +517,23 @@ export function RoutineDetail() {
   });
 
   const runRoutine = useMutation({
-    mutationFn: () => routinesApi.run(routineId!),
+    mutationFn: () => {
+      let payload: Record<string, unknown> | undefined = undefined;
+      const trimmed = runPayloadDraft.trim();
+      if (trimmed.length > 0) {
+        payload = JSON.parse(trimmed) as Record<string, unknown>;
+      }
+      if (routine) {
+        const completionPayload = buildManualOnCompletePayload(routine, manualOnCompleteDraft);
+        if (completionPayload) {
+          payload = {
+            ...(payload ?? {}),
+            ...completionPayload,
+          };
+        }
+      }
+      return routinesApi.run(routineId!, { source: "manual", payload });
+    },
     onSuccess: async () => {
       pushToast({ title: "Routine run started", tone: "success" });
       setActiveTab("runs");
@@ -665,6 +789,194 @@ export function RoutineDetail() {
           <span className={`min-w-[3.75rem] text-sm font-medium ${automationLabelClassName}`}>
             {automationLabel}
           </span>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">Manual run payload</p>
+            <p className="text-xs text-muted-foreground">루틴 변수 초안. today, project_name, workspace_name, graph_scope 같은 값을 payload로 넘길 수 있다.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={selectedPayloadPreset} onValueChange={(value) => {
+              setSelectedPayloadPreset(value);
+              if (DEFAULT_ROUTINE_PAYLOAD_PRESETS[value]) {
+                setRunPayloadDraft(DEFAULT_ROUTINE_PAYLOAD_PRESETS[value]);
+              }
+            }}>
+              <SelectTrigger className="h-8 w-[180px] text-xs">
+                <SelectValue placeholder="Payload preset" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="core_verify">Core verify</SelectItem>
+                <SelectItem value="retrospective">Retrospective</SelectItem>
+                <SelectItem value="control_board">Control board</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                try {
+                  const raw = localStorage.getItem(ROUTINE_PAYLOAD_PRESET_KEY);
+                  const parsed = raw ? JSON.parse(raw) as Record<string, string> : {};
+                  parsed[selectedPayloadPreset] = runPayloadDraft;
+                  localStorage.setItem(ROUTINE_PAYLOAD_PRESET_KEY, JSON.stringify(parsed));
+                  pushToast({ title: "Payload preset saved", tone: "success" });
+                } catch (error) {
+                  pushToast({ title: "Failed to save payload preset", body: error instanceof Error ? error.message : "Preset save failed.", tone: "error" });
+                }
+              }}
+            >
+              Save preset
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setRunPayloadDraft(DEFAULT_ROUTINE_PAYLOAD_PRESETS[selectedPayloadPreset] ?? DEFAULT_ROUTINE_PAYLOAD_PRESETS.core_verify)}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+        <textarea
+          className="min-h-[132px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+          value={runPayloadDraft}
+          onChange={(event) => setRunPayloadDraft(event.target.value)}
+          spellCheck={false}
+        />
+        <div className="rounded-md border border-dashed border-border p-4 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Completion automation for manual runs</p>
+              <p className="text-xs text-muted-foreground">수동 실행이 실패하거나 시간 초과될 때 적용할 onComplete 정책을 시각적으로 편집한다.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="manual-oncomplete-enabled"
+                checked={manualOnCompleteDraft.enabled}
+                onCheckedChange={(checked) => setManualOnCompleteDraft((current) => ({ ...current, enabled: checked === true }))}
+              />
+              <Label htmlFor="manual-oncomplete-enabled" className="text-xs">Enable</Label>
+            </div>
+          </div>
+
+          {manualOnCompleteDraft.enabled && (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="manual-oncomplete-silent"
+                      checked={manualOnCompleteDraft.silentCompletion}
+                      onCheckedChange={(checked) => setManualOnCompleteDraft((current) => ({ ...current, silentCompletion: checked === true }))}
+                    />
+                    <Label htmlFor="manual-oncomplete-silent" className="text-xs">Silent completion</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">작업공간 준비 댓글 같은 자동 노이즈를 줄인다.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Parent issue status on failure</Label>
+                  <Select
+                    value={manualOnCompleteDraft.issueStatus}
+                    onValueChange={(value) => setManualOnCompleteDraft((current) => ({ ...current, issueStatus: value as ManualOnCompleteDraft["issueStatus"] }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No change</SelectItem>
+                      <SelectItem value="blocked">blocked</SelectItem>
+                      <SelectItem value="done">done</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Parent issue comment template</Label>
+                <textarea
+                  className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={manualOnCompleteDraft.commentBody}
+                  onChange={(event) => setManualOnCompleteDraft((current) => ({ ...current, commentBody: event.target.value }))}
+                  spellCheck={false}
+                />
+                <p className="text-[11px] text-muted-foreground">사용 가능: {'{outcome}'}, {'{runId}'}, {'{agentId}'}, {'{issueId}'}, {'{createdIssueIdentifier}'}</p>
+              </div>
+
+              <div className="space-y-3 rounded-md border border-border p-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="manual-oncomplete-create-issue"
+                    checked={manualOnCompleteDraft.createIssue}
+                    onCheckedChange={(checked) => setManualOnCompleteDraft((current) => ({ ...current, createIssue: checked === true }))}
+                  />
+                  <Label htmlFor="manual-oncomplete-create-issue" className="text-xs font-medium">Create follow-up issue</Label>
+                </div>
+
+                {manualOnCompleteDraft.createIssue && (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label className="text-xs">Follow-up issue title</Label>
+                      <Input
+                        value={manualOnCompleteDraft.createIssueTitle}
+                        onChange={(event) => setManualOnCompleteDraft((current) => ({ ...current, createIssueTitle: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label className="text-xs">Follow-up issue description</Label>
+                      <textarea
+                        className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={manualOnCompleteDraft.createIssueDescription}
+                        onChange={(event) => setManualOnCompleteDraft((current) => ({ ...current, createIssueDescription: event.target.value }))}
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Priority</Label>
+                      <Select
+                        value={manualOnCompleteDraft.createIssuePriority}
+                        onValueChange={(value) => setManualOnCompleteDraft((current) => ({ ...current, createIssuePriority: value as ManualOnCompleteDraft["createIssuePriority"] }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="critical">critical</SelectItem>
+                          <SelectItem value="high">high</SelectItem>
+                          <SelectItem value="medium">medium</SelectItem>
+                          <SelectItem value="low">low</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 pt-6">
+                        <Checkbox
+                          id="manual-oncomplete-assign-routine-agent"
+                          checked={manualOnCompleteDraft.assignToRoutineAssignee}
+                          onCheckedChange={(checked) => setManualOnCompleteDraft((current) => ({ ...current, assignToRoutineAssignee: checked === true }))}
+                        />
+                        <Label htmlFor="manual-oncomplete-assign-routine-agent" className="text-xs">Assign to routine assignee</Label>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label className="text-xs">Follow-up issue comment template</Label>
+                      <textarea
+                        className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={manualOnCompleteDraft.createIssueCommentBody}
+                        onChange={(event) => setManualOnCompleteDraft((current) => ({ ...current, createIssueCommentBody: event.target.value }))}
+                        spellCheck={false}
+                      />
+                      <p className="text-[11px] text-muted-foreground">사용 가능: {'{runId}'}, {'{issueId}'}, {'{createdIssueId}'}, {'{createdIssueIdentifier}'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

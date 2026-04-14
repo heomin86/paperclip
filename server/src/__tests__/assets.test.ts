@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import request from "supertest";
-import { MAX_ATTACHMENT_BYTES } from "../attachment-types.js";
+import { getMaxAttachmentBytes, resetAllowedContentTypes } from "../attachment-types.js";
 import { assetRoutes } from "../routes/assets.js";
 import type { StorageService } from "../storage/types.js";
 
@@ -17,6 +17,18 @@ vi.mock("../services/index.js", () => ({
     getById: getAssetByIdMock,
   })),
   logActivity: logActivityMock,
+  // Preserve other services for test isolation
+  accessService: vi.fn(() => ({})),
+  agentService: vi.fn(() => ({})),
+  documentService: vi.fn(() => ({})),
+  executionWorkspaceService: vi.fn(() => ({})),
+  goalService: vi.fn(() => ({})),
+  heartbeatService: vi.fn(() => ({})),
+  issueApprovalService: vi.fn(() => ({})),
+  issueService: vi.fn(() => ({})),
+  projectService: vi.fn(() => ({})),
+  routineService: vi.fn(() => ({})),
+  workProductService: vi.fn(() => ({})),
 }));
 
 function createAsset() {
@@ -65,6 +77,20 @@ function createStorageService(contentType = "image/png"): StorageService {
 }
 
 function createApp(storage: ReturnType<typeof createStorageService>) {
+  // Mock database with the required insert method
+  const mockDb = {
+    insert: vi.fn(() => ({
+      values: vi.fn(() => ({
+        returning: vi.fn(() => Promise.resolve([createAsset()])),
+      })),
+    })),
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => Promise.resolve([createAsset()])),
+      })),
+    })),
+  } as any;
+  
   const app = express();
   app.use((req, _res, next) => {
     req.actor = {
@@ -74,11 +100,25 @@ function createApp(storage: ReturnType<typeof createStorageService>) {
     };
     next();
   });
-  app.use("/api", assetRoutes({} as any, storage));
+  app.use("/api", assetRoutes(mockDb, storage));
   return app;
 }
 
 describe("POST /api/companies/:companyId/assets/images", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createAssetMock.mockReset();
+    getAssetByIdMock.mockReset();
+    logActivityMock.mockReset();
+    
+    // Set up the mocks to return appropriate values
+    createAssetMock.mockResolvedValue(createAsset());
+    getAssetByIdMock.mockResolvedValue(createAsset());
+    logActivityMock.mockResolvedValue(undefined);
+    
+    resetAllowedContentTypes(); // Reset attachment type cache
+  });
+
   afterEach(() => {
     createAssetMock.mockReset();
     getAssetByIdMock.mockReset();
@@ -135,11 +175,24 @@ describe("POST /api/companies/:companyId/assets/images", () => {
 });
 
 describe("POST /api/companies/:companyId/logo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createAssetMock.mockReset();
+    getAssetByIdMock.mockReset();
+    logActivityMock.mockReset();
+    resetAllowedContentTypes(); // Reset attachment type cache
+    
+    // Ensure environment variables are clean for size limit tests
+    delete process.env.PAPERCLIP_ATTACHMENT_MAX_BYTES;
+  });
+
   afterEach(() => {
     createAssetMock.mockReset();
     getAssetByIdMock.mockReset();
     logActivityMock.mockReset();
   });
+
+
 
   it("accepts PNG logo uploads and returns an asset path", async () => {
     const png = createStorageService("image/png");
@@ -204,7 +257,7 @@ describe("POST /api/companies/:companyId/logo", () => {
     const file = Buffer.alloc(150 * 1024, "a");
     const res = await request(app)
       .post("/api/companies/company-1/logo")
-      .attach("file", file, "within-limit.png");
+      .attach("file", file, { filename: "within-limit.png", contentType: "image/png" });
 
     expect(res.status).toBe(201);
   });
@@ -213,13 +266,13 @@ describe("POST /api/companies/:companyId/logo", () => {
     const app = createApp(createStorageService());
     createAssetMock.mockResolvedValue(createAsset());
 
-    const file = Buffer.alloc(MAX_ATTACHMENT_BYTES + 1, "a");
+    const file = Buffer.alloc(getMaxAttachmentBytes() + 1, "a");
     const res = await request(app)
       .post("/api/companies/company-1/logo")
       .attach("file", file, "too-large.png");
 
     expect(res.status).toBe(422);
-    expect(res.body.error).toBe(`Image exceeds ${MAX_ATTACHMENT_BYTES} bytes`);
+    expect(res.body.error).toBe(`Image exceeds ${getMaxAttachmentBytes()} bytes`);
   });
 
   it("rejects unsupported image types", async () => {
@@ -228,7 +281,7 @@ describe("POST /api/companies/:companyId/logo", () => {
 
     const res = await request(app)
       .post("/api/companies/company-1/logo")
-      .attach("file", Buffer.from("not an image"), "note.txt");
+      .attach("file", Buffer.from("not an image"), { filename: "note.txt", contentType: "text/plain" });
 
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("Unsupported image type: text/plain");

@@ -115,7 +115,12 @@ export function costRoutes(db: Db) {
   router.get("/companies/:companyId/costs/summary", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    const range = parseDateRange(req.query);
+    let range;
+    try {
+      range = parseDateRange(req.query);
+    } catch (error) {
+      return res.status(400).json({ error: (error as Error).message });
+    }
     const summary = await costs.summary(companyId, range);
     res.json(summary);
   });
@@ -179,8 +184,14 @@ export function costRoutes(db: Db) {
   router.get("/companies/:companyId/costs/finance-events", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    const range = parseDateRange(req.query);
-    const limit = parseLimit(req.query);
+    let range;
+    let limit;
+    try {
+      range = parseDateRange(req.query);
+      limit = parseLimit(req.query);
+    } catch (error) {
+      return res.status(400).json({ error: (error as Error).message });
+    }
     const rows = await finance.list(companyId, range, limit);
     res.json(rows);
   });

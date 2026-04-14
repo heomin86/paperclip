@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { costRoutes } from "../routes/costs.js";
 import { errorHandler } from "../middleware/index.js";
 
@@ -111,6 +111,10 @@ function createAppWithActor(actor: any) {
   return app;
 }
 
+afterAll(() => {
+  vi.restoreAllMocks();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockCompanyService.update.mockResolvedValue({
@@ -201,6 +205,9 @@ describe("cost routes", () => {
   });
 
   it("rejects agent budget updates for board users outside the agent company", async () => {
+    // Explicitly reset and set up the mock to avoid test isolation issues
+    mockAgentService.getById.mockReset();
+    mockAgentService.update.mockReset();
     mockAgentService.getById.mockResolvedValue({
       id: "agent-1",
       companyId: "company-1",

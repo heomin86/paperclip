@@ -143,12 +143,21 @@ export function routineRoutes(db: Db) {
   });
 
   router.post("/routines/:id/triggers", validate(createRoutineTriggerSchema), async (req, res) => {
-    const routine = await assertCanManageExistingRoutine(req, req.params.id as string);
+    const routine = await svc.get(req.params.id as string);
     if (!routine) {
       res.status(404).json({ error: "Routine not found" });
       return;
     }
+    assertCompanyAccess(req, routine.companyId);
     await assertBoardCanAssignTasks(req, routine.companyId);
+    
+    // For agent actors, ensure they can only manage their own routines
+    if (req.actor.type === "agent") {
+      if (!req.actor.agentId) throw unauthorized();
+      if (routine.assigneeAgentId !== req.actor.agentId) {
+        throw forbidden("Agents can only manage routines assigned to themselves");
+      }
+    }
     const created = await svc.createTrigger(routine.id, req.body, {
       agentId: req.actor.type === "agent" ? req.actor.agentId : null,
       userId: req.actor.type === "board" ? req.actor.userId ?? "board" : null,

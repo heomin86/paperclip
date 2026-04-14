@@ -59,19 +59,21 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
   });
 
   async function seedFixture(opts?: {
-    wakeup?: (
-      agentId: string,
-      wakeupOpts: {
-        source?: string;
-        triggerDetail?: string;
-        reason?: string | null;
-        payload?: Record<string, unknown> | null;
-        requestedByActorType?: "user" | "agent" | "system";
-        requestedByActorId?: string | null;
-        contextSnapshot?: Record<string, unknown>;
-      },
-    ) => Promise<unknown>;
-  }) {
+      wakeup?: (
+        agentId: string,
+        wakeupOpts: {
+          source?: string;
+          triggerDetail?: string;
+          reason?: string | null;
+          payload?: Record<string, unknown> | null;
+          requestedByActorType?: "user" | "agent" | "system";
+          requestedByActorId?: string | null;
+          contextSnapshot?: Record<string, unknown>;
+          silentCompletion?: boolean;
+          onComplete?: Record<string, unknown> | null;
+        },
+      ) => Promise<unknown>;
+}) {
     const companyId = randomUUID();
     const agentId = randomUUID();
     const projectId = randomUUID();
@@ -86,6 +88,8 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
         requestedByActorType?: "user" | "agent" | "system";
         requestedByActorId?: string | null;
         contextSnapshot?: Record<string, unknown>;
+        silentCompletion?: boolean;
+        onComplete?: Record<string, unknown> | null;
       };
     }> = [];
 
@@ -232,6 +236,20 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
           requestedByActorType: undefined,
           requestedByActorId: null,
           contextSnapshot: { issueId: run.linkedIssueId, source: "routine.dispatch" },
+          silentCompletion: true,
+          onComplete: {
+            issueStatus: "blocked",
+            commentBody: "루틴 실행이 비정상 종료되었습니다. 결과: {outcome}. 후속 이슈: {createdIssueIdentifier}",
+            createIssue: {
+              title: "Follow-up: ascii frog",
+              description: "Automatically created because the routine execution heartbeat failed or timed out.",
+              status: "todo",
+              priority: "medium",
+              assignToAgentId: agentId,
+              commentBody: "이 이슈는 실행 {runId} 의 실패 후 자동 생성되었습니다. 부모 이슈: {issueId}",
+            },
+            onlyOn: ["failed", "timed_out"],
+          },
         },
       },
     ]);

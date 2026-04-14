@@ -821,9 +821,9 @@ export function IssueDetail() {
   const copyIssueToClipboard = async () => {
     if (!issue) return;
     const decodeEntities = (text: string) => {
-      const el = document.createElement("textarea");
-      el.innerHTML = text;
-      return el.value;
+      // Use DOMParser for safe HTML entity decoding without XSS risk
+      const doc = new DOMParser().parseFromString(text, "text/html");
+      return doc.documentElement.textContent || "";
     };
     const title = decodeEntities(issue.title);
     const body = decodeEntities(issue.description ?? "");

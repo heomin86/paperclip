@@ -67,6 +67,7 @@ type InboxCategoryFilter =
   | "approvals"
   | "failed_runs"
   | "alerts";
+type InboxIssueQueueFilter = "all" | "batch_verify" | "broken_entities" | "rules" | "proposal";
 type SectionKey =
   | "work_items"
   | "alerts";
@@ -598,6 +599,7 @@ export function Inbox() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
   const [allCategoryFilter, setAllCategoryFilter] = useState<InboxCategoryFilter>("everything");
+  const [allIssueQueueFilter, setAllIssueQueueFilter] = useState<InboxIssueQueueFilter>("all");
   const [allApprovalFilter, setAllApprovalFilter] = useState<InboxApprovalFilter>("all");
   const { dismissed, dismiss } = useDismissedInboxItems();
   const { readItems, markRead: markItemRead, markUnread: markItemUnread } = useReadInboxItems();
@@ -713,11 +715,23 @@ export function Inbox() {
   );
   const issuesToRender = useMemo(
     () => {
-      if (tab === "mine") return mineIssues;
-      if (tab === "unread") return unreadTouchedIssues;
-      return touchedIssues;
+      const base = tab === "mine" ? mineIssues : tab === "unread" ? unreadTouchedIssues : touchedIssues;
+      if (tab !== "all" || allIssueQueueFilter === "all") return base;
+      if (allIssueQueueFilter === "batch_verify") {
+        return base.filter((issue) => issue.title.toLowerCase().includes("batch") || issue.title.toLowerCase().includes("verify"));
+      }
+      if (allIssueQueueFilter === "broken_entities") {
+        return base.filter((issue) => issue.title.toLowerCase().includes("entity"));
+      }
+      if (allIssueQueueFilter === "rules") {
+        return base.filter((issue) => issue.title.toLowerCase().includes("rule"));
+      }
+      if (allIssueQueueFilter === "proposal") {
+        return base.filter((issue) => issue.title.toLowerCase().includes("proposal"));
+      }
+      return base;
     },
-    [tab, mineIssues, touchedIssues, unreadTouchedIssues],
+    [tab, mineIssues, touchedIssues, unreadTouchedIssues, allIssueQueueFilter],
   );
 
   const agentById = useMemo(() => {
@@ -1252,7 +1266,33 @@ export function Inbox() {
       </div>
 
       {tab === "all" && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="space-y-3">
+          {selectedCompanyId === "ec03757a-f470-4453-89c1-5a7a1a6640db" && (
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <button type="button" onClick={() => setAllIssueQueueFilter("batch_verify")} className={`rounded-lg border bg-card px-3 py-2 text-left ${allIssueQueueFilter === "batch_verify" ? "ring-1 ring-amber-400" : ""}`}>
+                <div className="text-lg font-semibold text-amber-400">{(issues ?? []).filter((issue) => issue.status !== "done" && (issue.title.toLowerCase().includes("batch") || issue.title.toLowerCase().includes("verify"))).length}</div>
+                <div className="text-xs text-muted-foreground">batch / verify queue</div>
+              </button>
+              <button type="button" onClick={() => setAllIssueQueueFilter("broken_entities")} className={`rounded-lg border bg-card px-3 py-2 text-left ${allIssueQueueFilter === "broken_entities" ? "ring-1 ring-amber-400" : ""}`}>
+                <div className="text-lg font-semibold text-amber-400">{(issues ?? []).filter((issue) => issue.status !== "done" && issue.title.toLowerCase().includes("entity")).length}</div>
+                <div className="text-xs text-muted-foreground">broken entity queue</div>
+              </button>
+              <button type="button" onClick={() => setAllIssueQueueFilter("rules")} className={`rounded-lg border bg-card px-3 py-2 text-left ${allIssueQueueFilter === "rules" ? "ring-1 ring-amber-400" : ""}`}>
+                <div className="text-lg font-semibold">{(issues ?? []).filter((issue) => issue.status !== "done" && issue.title.toLowerCase().includes("rule")).length}</div>
+                <div className="text-xs text-muted-foreground">rule candidate queue</div>
+              </button>
+              <button type="button" onClick={() => setAllIssueQueueFilter("proposal")} className={`rounded-lg border bg-card px-3 py-2 text-left ${allIssueQueueFilter === "proposal" ? "ring-1 ring-amber-400" : ""}`}>
+                <div className="text-lg font-semibold">{(issues ?? []).filter((issue) => issue.status !== "done" && issue.title.toLowerCase().includes("proposal")).length}</div>
+                <div className="text-xs text-muted-foreground">proposal follow-up queue</div>
+              </button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+          {selectedCompanyId === "ec03757a-f470-4453-89c1-5a7a1a6640db" && allIssueQueueFilter !== "all" && (
+            <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setAllIssueQueueFilter("all")}>
+              queue filter reset
+            </Button>
+          )}
           <Select
             value={allCategoryFilter}
             onValueChange={(value) => setAllCategoryFilter(value as InboxCategoryFilter)}
@@ -1285,6 +1325,7 @@ export function Inbox() {
               </SelectContent>
             </Select>
           )}
+          </div>
         </div>
       )}
 

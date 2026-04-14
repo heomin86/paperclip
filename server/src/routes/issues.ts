@@ -1072,7 +1072,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
-    if (commentBody && reopenRequested === true && isClosed && updateFields.status === undefined) {
+    if (commentBody && reopenRequested === true && isClosed) {
       updateFields.status = "todo";
     }
     let issue;

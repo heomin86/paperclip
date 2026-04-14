@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routineRoutes } from "../routes/routines.js";
 import { errorHandler } from "../middleware/index.js";
 
@@ -83,10 +83,21 @@ const mockAccessService = vi.hoisted(() => ({
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
+// Clear any global mocks that might interfere from other test files
+vi.unmock("../services/companies.js");
+vi.unmock("../services/agents.js");
+vi.unmock("../services/access.js");
+vi.unmock("../services/projects.js");
+vi.unmock("../services/issues.js");
+vi.unmock("../services/company-portability.js");
+vi.unmock("../services/company-skills.js");
+vi.unmock("../services/assets.js");
+vi.unmock("../services/agent-instructions.js");
+
 vi.mock("../services/index.js", () => ({
-  accessService: () => mockAccessService,
+  accessService: vi.fn(() => mockAccessService),
   logActivity: mockLogActivity,
-  routineService: () => mockRoutineService,
+  routineService: vi.fn(() => mockRoutineService),
 }));
 
 function createApp(actor: Record<string, unknown>) {
@@ -104,6 +115,8 @@ function createApp(actor: Record<string, unknown>) {
 describe("routine routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    
+    // Reset all mocks to their default behavior
     mockRoutineService.create.mockResolvedValue(routine);
     mockRoutineService.get.mockResolvedValue(routine);
     mockRoutineService.getTrigger.mockResolvedValue(trigger);
@@ -113,8 +126,14 @@ describe("routine routes", () => {
       source: "manual",
       status: "issue_created",
     });
-    mockAccessService.canUser.mockResolvedValue(false);
+    mockAccessService.canUser.mockResolvedValue(false); // Default: no permission
     mockLogActivity.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    // Reset the mock implementation to ensure test isolation
+    mockAccessService.canUser.mockResolvedValue(false);
   });
 
   it("requires tasks:assign permission for non-admin board routine creation", async () => {
@@ -241,7 +260,11 @@ describe("routine routes", () => {
   });
 
   it("allows routine creation when the board user has tasks:assign", async () => {
+    // Set up mocks for this specific test
     mockAccessService.canUser.mockResolvedValue(true);
+    mockRoutineService.create.mockResolvedValue(routine);
+    mockLogActivity.mockResolvedValue(undefined);
+    
     const app = createApp({
       type: "board",
       userId: "board-user",

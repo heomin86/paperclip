@@ -61,7 +61,7 @@ export function matchesContentType(contentType: string, allowedPatterns: string[
 
 // ---------- Module-level singletons read once at startup ----------
 
-const allowedPatterns: string[] = parseAllowedTypes(
+let allowedPatterns: string[] = parseAllowedTypes(
   process.env.PAPERCLIP_ALLOWED_ATTACHMENT_TYPES,
 );
 
@@ -70,5 +70,13 @@ export function isAllowedContentType(contentType: string): boolean {
   return matchesContentType(contentType, allowedPatterns);
 }
 
-export const MAX_ATTACHMENT_BYTES =
-  Number(process.env.PAPERCLIP_ATTACHMENT_MAX_BYTES) || 10 * 1024 * 1024;
+/** Reset the allowed patterns cache - for testing purposes. */
+export function resetAllowedContentTypes(): void {
+  allowedPatterns = parseAllowedTypes(process.env.PAPERCLIP_ALLOWED_ATTACHMENT_TYPES);
+}
+
+export function getMaxAttachmentBytes(): number {
+  return Number(process.env.PAPERCLIP_ATTACHMENT_MAX_BYTES) || 10 * 1024 * 1024;
+}
+
+export const MAX_ATTACHMENT_BYTES = getMaxAttachmentBytes();
