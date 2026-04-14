@@ -3,6 +3,7 @@ import type { CompanyPortabilityPreviewResult } from "@paperclipai/shared";
 import {
   buildCompanyDashboardUrl,
   buildDefaultImportAdapterOverrides,
+  buildInteractiveImportAdapterOverrides,
   buildDefaultImportSelectionState,
   buildImportSelectionCatalog,
   buildSelectedFilesFromImportSelection,

@@ -403,8 +403,9 @@ export async function flushPluginLogBuffer(): Promise<void> {
     } catch (err) {
       try {
         logger.warn({ err, count: values.length }, "Failed to batch-persist plugin logs to DB");
-      } catch {
-        console.error("[plugin-host-services] Batch log flush failed:", err);
+      } catch (logErr) {
+        // Fallback if even the fallback logger fails - this shouldn't happen in practice
+        console.error("[plugin-host-services] Batch log flush failed:", err, "Logger error:", logErr);
       }
     }
   }
@@ -413,7 +414,12 @@ export async function flushPluginLogBuffer(): Promise<void> {
 /** Interval handle for the periodic log flush. */
 const _logFlushInterval = setInterval(() => {
   flushPluginLogBuffer().catch((err) => {
-    console.error("[plugin-host-services] Periodic log flush error:", err);
+    try {
+      logger.error({ err }, "Periodic plugin log flush failed");
+    } catch (logErr) {
+      // Fallback if even the fallback logger fails
+      console.error("[plugin-host-services] Periodic log flush error:", err, "Logger error:", logErr);
+    }
   });
 }, LOG_BUFFER_FLUSH_INTERVAL_MS);
 

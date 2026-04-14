@@ -14,8 +14,21 @@ const mockInstanceSettingsService = vi.hoisted(() => ({
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
-  instanceSettingsService: () => mockInstanceSettingsService,
+  agentService: vi.fn(() => ({ update: vi.fn() })),
+  agentInstructionsService: vi.fn(() => ({})),
+  accessService: vi.fn(() => ({})),
+  approvalService: vi.fn(() => ({})),
+  budgetService: vi.fn(() => ({})),
+  companySkillService: vi.fn(() => ({ listRuntimeSkillEntries: vi.fn() })),
+  documentService: vi.fn(() => ({})),
+  heartbeatService: vi.fn(() => ({})),
+  instanceSettingsService: vi.fn(() => mockInstanceSettingsService),
+  issueApprovalService: vi.fn(() => ({})),
+  issueService: vi.fn(() => ({})),
   logActivity: mockLogActivity,
+  secretService: vi.fn(() => ({})),
+  syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
+  workspaceOperationService: vi.fn(() => ({})),
 }));
 
 function createApp(actor: any) {
@@ -33,6 +46,7 @@ function createApp(actor: any) {
 describe("instance settings routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetAllMocks();
     mockInstanceSettingsService.getGeneral.mockResolvedValue({
       censorUsernameInLogs: false,
     });

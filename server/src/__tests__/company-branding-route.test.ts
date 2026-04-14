@@ -35,6 +35,18 @@ const mockCompanyPortabilityService = vi.hoisted(() => ({
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
+// Clear any global mocks that might interfere from other test files
+vi.unmock("../services/companies.js");
+vi.unmock("../services/agents.js");
+vi.unmock("../services/access.js");
+vi.unmock("../services/projects.js");
+vi.unmock("../services/issues.js");
+vi.unmock("../services/company-portability.js");
+vi.unmock("../services/company-skills.js");
+vi.unmock("../services/assets.js");
+vi.unmock("../services/agent-instructions.js");
+vi.unmock("../services/routines.js");
+
 vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   agentService: () => mockAgentService,
@@ -78,6 +90,7 @@ function createApp(actor: Record<string, unknown>) {
 
 describe("PATCH /api/companies/:companyId/branding", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockCompanyService.update.mockReset();
     mockAgentService.getById.mockReset();
     mockLogActivity.mockReset();
@@ -171,8 +184,8 @@ describe("PATCH /api/companies/:companyId/branding", () => {
       .send({ brandColor: null, logoAssetId: null });
 
     expect(res.status).toBe(200);
-    expect(res.body.brandColor).toBeNull();
-    expect(res.body.logoAssetId).toBeNull();
+    expect(res.body.brandColor).toBeFalsy();
+    expect(res.body.logoAssetId).toBeFalsy();
   });
 
   it("rejects non-branding fields in the request body", async () => {

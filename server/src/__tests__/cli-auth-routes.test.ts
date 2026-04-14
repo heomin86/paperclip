@@ -61,6 +61,15 @@ function createApp(actor: any) {
 describe("cli auth routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset all mock implementations to ensure clean state
+    mockBoardAuthService.createCliAuthChallenge.mockReset();
+    mockBoardAuthService.describeCliAuthChallenge.mockReset();
+    mockBoardAuthService.approveCliAuthChallenge.mockReset();
+    mockBoardAuthService.cancelCliAuthChallenge.mockReset();
+    mockBoardAuthService.resolveBoardAccess.mockReset();
+    mockBoardAuthService.resolveBoardActivityCompanyIds.mockReset();
+    mockBoardAuthService.assertCurrentBoardKey.mockReset();
+    mockBoardAuthService.revokeBoardApiKey.mockReset();
   });
 
   it("creates a CLI auth challenge with approval metadata", async () => {
@@ -85,13 +94,13 @@ describe("cli auth routes", () => {
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       id: "challenge-1",
-      token: "pcp_cli_auth_secret",
+      challengeToken: "pcp_cl...cret",
       boardApiToken: "pcp_board_token",
-      approvalPath: "/cli-auth/challenge-1?token=pcp_cli_auth_secret",
+      approvalPath: "/cli-auth/challenge-1?token=pcp_cl...cret",
       pollPath: "/cli-auth/challenges/challenge-1",
       expiresAt: "2026-03-23T13:00:00.000Z",
     });
-    expect(res.body.approvalUrl).toContain("/cli-auth/challenge-1?token=pcp_cli_auth_secret");
+    expect(res.body.approvalUrl).toContain("/cli-auth/challenge-1?token=pcp_cl...cret");
   });
 
   it("marks challenge status as requiring sign-in for anonymous viewers", async () => {
@@ -110,7 +119,7 @@ describe("cli auth routes", () => {
     });
 
     const app = await createApp({ type: "none", source: "none" });
-    const res = await request(app).get("/api/cli-auth/challenges/challenge-1?token=pcp_cli_auth_secret");
+    const res = await request(app).get("/api/cli-auth/challenges/challenge-1?token=pcp_cl...t");
 
     expect(res.status).toBe(200);
     expect(res.body.requiresSignIn).toBe(true);

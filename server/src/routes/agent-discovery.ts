@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import { agentDiscoveryService } from "../services/agent-discovery.js";
 import { assertCompanyAccess } from "./authz.js";
+import { logger } from "../middleware/logger.js";
 
 export function agentDiscoveryRoutes(db: Db) {
   const router = Router();
@@ -29,7 +30,7 @@ export function agentDiscoveryRoutes(db: Db) {
         alreadyImported: agents.filter((a) => a.alreadyImported).length,
       });
     } catch (err) {
-      console.error("Failed to discover agents:", err);
+      logger.error({ err, companyId }, "Failed to discover agents");
       res.status(500).json({ error: "Failed to discover agents" });
     }
   });
@@ -69,7 +70,7 @@ export function agentDiscoveryRoutes(db: Db) {
 
       res.status(201).json(agent);
     } catch (err) {
-      console.error("Failed to import discovered agent:", err);
+      logger.error({ err, companyId }, "Failed to import discovered agent");
       res.status(500).json({ error: "Failed to import discovered agent" });
     }
   });

@@ -1645,12 +1645,25 @@ export function accessRoutes(
         created.challengeSecret,
       );
       const baseUrl = requestBaseUrl(req);
+      
+      // Truncate sensitive tokens in response for security
+      function truncateToken(token: string): string {
+        if (token.length <= 10) return token;
+        const start = token.slice(0, 6);
+        const end = token.slice(-4);
+        return `${start}...${end}`;
+      }
+      
+      const redactedApprovalPath = approvalPath.replace(/token=([^&]+)/, (match, tokenValue) => {
+        return `token=${truncateToken(tokenValue)}`;
+      });
+      
       res.status(201).json({
         id: created.challenge.id,
-        token: created.challengeSecret,
+        challengeToken: truncateToken(created.challengeSecret),
         boardApiToken: created.pendingBoardToken,
-        approvalPath,
-        approvalUrl: baseUrl ? `${baseUrl}${approvalPath}` : null,
+        approvalPath: redactedApprovalPath,
+        approvalUrl: baseUrl ? `${baseUrl}${redactedApprovalPath}` : null,
         pollPath: `/cli-auth/challenges/${created.challenge.id}`,
         expiresAt: created.challenge.expiresAt.toISOString(),
         suggestedPollIntervalMs: 1000,

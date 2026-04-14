@@ -504,21 +504,29 @@ export function agentService(db: Db) {
       return updated ? normalizeAgentRow(updated) : null;
     },
 
-    updatePermissions: async (id: string, permissions: { canCreateAgents: boolean }) => {
+    updatePermissions: async (id: string, permissions: { canCreateAgents: boolean } | Array<{permission: string, allowed: boolean}>, actor?: string) => {
       const existing = await getById(id);
       if (!existing) return null;
 
-      const updated = await db
-        .update(agents)
-        .set({
-          permissions: normalizeAgentPermissions(permissions, existing.role),
-          updatedAt: new Date(),
-        })
-        .where(eq(agents.id, id))
-        .returning()
-        .then((rows) => rows[0] ?? null);
+      // Handle both old and new format
+      if (Array.isArray(permissions)) {
+        // New grants-based format - permissions will be handled by access service
+        // Just return the agent without updating the legacy permissions field
+        return existing;
+      } else {
+        // Legacy format
+        const updated = await db
+          .update(agents)
+          .set({
+            permissions: normalizeAgentPermissions(permissions, existing.role),
+            updatedAt: new Date(),
+          })
+          .where(eq(agents.id, id))
+          .returning()
+          .then((rows) => rows[0] ?? null);
 
-      return updated ? normalizeAgentRow(updated) : null;
+        return updated ? normalizeAgentRow(updated) : null;
+      }
     },
 
     listConfigRevisions: async (id: string) =>

@@ -5,6 +5,7 @@ import { agents as agentsTable } from "@paperclipai/db";
 import { eq } from "drizzle-orm";
 import { findServerAdapter, listServerAdapters } from "../adapters/index.js";
 import type { AdapterEnvironmentTestResult } from "../adapters/types.js";
+import { logger } from "../middleware/logger.js";
 
 const execAsync = promisify(exec);
 
@@ -195,7 +196,7 @@ export function agentDiscoveryService(db: Db) {
         };
       });
     } catch (err) {
-      console.error("Failed to discover gateway agents:", err);
+      logger.error({ err }, "Failed to discover gateway agents");
       return [];
     }
   }

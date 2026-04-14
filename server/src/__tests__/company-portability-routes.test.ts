@@ -33,6 +33,17 @@ const mockCompanyPortabilityService = vi.hoisted(() => ({
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
+// Clear any global mocks that might interfere from other test files
+vi.unmock("../services/companies.js");
+vi.unmock("../services/agents.js");
+vi.unmock("../services/access.js");
+vi.unmock("../services/projects.js");
+vi.unmock("../services/issues.js");
+vi.unmock("../services/routines.js");
+vi.unmock("../services/company-skills.js");
+vi.unmock("../services/assets.js");
+vi.unmock("../services/agent-instructions.js");
+
 vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   agentService: () => mockAgentService,
@@ -58,7 +69,7 @@ async function createApp(actor: Record<string, unknown>) {
 
 describe("company portability routes", () => {
   beforeEach(() => {
-    vi.resetModules();
+    vi.clearAllMocks();
     mockAgentService.getById.mockReset();
     mockCompanyPortabilityService.exportBundle.mockReset();
     mockCompanyPortabilityService.previewExport.mockReset();

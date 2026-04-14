@@ -42,6 +42,7 @@ import { ScrollToBottom } from "../components/ScrollToBottom";
 import { formatCents, formatDate, relativeTime, formatTokens, visibleRunCostUsd } from "../lib/utils";
 import { cn } from "../lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -74,6 +75,7 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
 import {
@@ -283,6 +285,54 @@ function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+type RunOnCompleteDraft = {
+  enabled: boolean;
+  silentCompletion: boolean;
+  issueStatus: "none" | "blocked" | "done";
+  commentBody: string;
+  createIssue: boolean;
+  createIssueTitle: string;
+  createIssueDescription: string;
+  createIssuePriority: "critical" | "high" | "medium" | "low";
+  createIssueCommentBody: string;
+};
+
+function buildRunOnCompletePayload(
+  run: HeartbeatRun,
+  draft: RunOnCompleteDraft,
+): { silentCompletion: boolean; onComplete: Record<string, unknown> } | null {
+  if (!draft.enabled) return null;
+  const context = asRecord(run.contextSnapshot);
+  const issueId = asNonEmptyString(context?.issueId);
+  const onComplete: Record<string, unknown> = {
+    onlyOn: ["failed", "timed_out"],
+  };
+
+  if (draft.issueStatus !== "none") {
+    onComplete.issueStatus = draft.issueStatus;
+  }
+  if (draft.commentBody.trim()) {
+    onComplete.commentBody = draft.commentBody.trim();
+  }
+  if (draft.createIssue && draft.createIssueTitle.trim()) {
+    onComplete.createIssue = {
+      title: draft.createIssueTitle.trim(),
+      description: draft.createIssueDescription.trim() || null,
+      status: "todo",
+      priority: draft.createIssuePriority,
+      commentBody: draft.createIssueCommentBody.trim() || null,
+    };
+  }
+  if (issueId) {
+    onComplete.contextSnapshot = { issueId };
+  }
+
+  return {
+    silentCompletion: draft.silentCompletion,
+    onComplete,
+  };
 }
 
 function parseStoredLogContent(content: string): RunLogChunk[] {
@@ -768,8 +818,8 @@ export function AgentDetail() {
         crumbs.push({ label: "Instructions" });
       } else if (activeView === "configuration") {
         crumbs.push({ label: "Configuration" });
-      // } else if (activeView === "skills") { // TODO: bring back later
-      //   crumbs.push({ label: "Skills" });
+      } else if (activeView === "skills") {
+        crumbs.push({ label: "Skills" });
       } else if (activeView === "runs") {
         crumbs.push({ label: "Runs" });
       } else if (activeView === "budget") {
@@ -2900,10 +2950,30 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
   const metrics = runMetrics(run);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [claudeLoginResult, setClaudeLoginResult] = useState<ClaudeLoginResult | null>(null);
+  const [runOnCompleteDraft, setRunOnCompleteDraft] = useState<RunOnCompleteDraft>({
+    enabled: false,
+    silentCompletion: true,
+    issueStatus: "blocked",
+    commentBody: "실행이 비정상 종료되었습니다. 결과: {outcome}. 후속 이슈: {createdIssueIdentifier}",
+    createIssue: true,
+    createIssueTitle: "",
+    createIssueDescription: "Automatically created because this run failed or timed out.",
+    createIssuePriority: "high",
+    createIssueCommentBody: "이 이슈는 실행 {runId} 실패 후 자동 생성되었습니다. 부모 이슈: {issueId}",
+  });
 
   useEffect(() => {
     setClaudeLoginResult(null);
   }, [run.id]);
+
+  useEffect(() => {
+    const context = asRecord(run.contextSnapshot);
+    const issueId = asNonEmptyString(context?.issueId);
+    setRunOnCompleteDraft((current) => ({
+      ...current,
+      createIssueTitle: current.createIssueTitle || `Follow-up for ${issueId ?? run.id}`,
+    }));
+  }, [run.contextSnapshot, run.id]);
 
   const cancelRun = useMutation({
     mutationFn: () => heartbeatsApi.cancel(run.id),
@@ -2912,6 +2982,7 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
     },
   });
   const canResumeLostRun = run.errorCode === "process_lost" && run.status === "failed";
+  const runCompletionPayload = useMemo(() => buildRunOnCompletePayload(run, runOnCompleteDraft), [run, runOnCompleteDraft]);
   const resumePayload = useMemo(() => {
     const payload: Record<string, unknown> = {
       resumeFromRunId: run.id,
@@ -2926,8 +2997,12 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
     if (taskId) payload.taskId = taskId;
     if (taskKey) payload.taskKey = taskKey;
     if (commentId) payload.commentId = commentId;
+    if (runCompletionPayload) {
+      payload.silentCompletion = runCompletionPayload.silentCompletion;
+      payload.onComplete = runCompletionPayload.onComplete;
+    }
     return payload;
-  }, [run.contextSnapshot, run.id]);
+  }, [run.contextSnapshot, run.id, runCompletionPayload]);
   const resumeRun = useMutation({
     mutationFn: async () => {
       const result = await agentsApi.wakeup(run.agentId, {
@@ -2958,8 +3033,12 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
     if (issueId) payload.issueId = issueId;
     if (taskId) payload.taskId = taskId;
     if (taskKey) payload.taskKey = taskKey;
+    if (runCompletionPayload) {
+      payload.silentCompletion = runCompletionPayload.silentCompletion;
+      payload.onComplete = runCompletionPayload.onComplete;
+    }
     return payload;
-  }, [run.contextSnapshot]);
+  }, [run.contextSnapshot, runCompletionPayload]);
   const retryRun = useMutation({
     mutationFn: async () => {
       const result = await agentsApi.wakeup(run.agentId, {
@@ -3090,6 +3169,127 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
             {retryRun.isError && (
               <div className="text-xs text-destructive">
                 {retryRun.error instanceof Error ? retryRun.error.message : "Failed to retry run"}
+              </div>
+            )}
+            {(canResumeLostRun || canRetryRun) && (
+              <div className="rounded-md border border-dashed border-border p-3 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium">Completion automation for retry/resume</p>
+                    <p className="text-[11px] text-muted-foreground">실패한 실행을 다시 깨울 때 사용할 onComplete 정책</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`run-oncomplete-enabled-${run.id}`}
+                      checked={runOnCompleteDraft.enabled}
+                      onCheckedChange={(checked) => setRunOnCompleteDraft((current) => ({ ...current, enabled: checked === true }))}
+                    />
+                    <Label htmlFor={`run-oncomplete-enabled-${run.id}`} className="text-[11px]">Enable</Label>
+                  </div>
+                </div>
+
+                {runOnCompleteDraft.enabled && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`run-oncomplete-silent-${run.id}`}
+                        checked={runOnCompleteDraft.silentCompletion}
+                        onCheckedChange={(checked) => setRunOnCompleteDraft((current) => ({ ...current, silentCompletion: checked === true }))}
+                      />
+                      <Label htmlFor={`run-oncomplete-silent-${run.id}`} className="text-[11px]">Silent completion</Label>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`run-oncomplete-status-${run.id}`} className="text-[11px]">Issue status on failure</Label>
+                      <select
+                        id={`run-oncomplete-status-${run.id}`}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={runOnCompleteDraft.issueStatus}
+                        onChange={(event) => setRunOnCompleteDraft((current) => ({
+                          ...current,
+                          issueStatus: event.target.value as RunOnCompleteDraft["issueStatus"],
+                        }))}
+                      >
+                        <option value="none">No change</option>
+                        <option value="blocked">blocked</option>
+                        <option value="done">done</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor={`run-oncomplete-comment-${run.id}`} className="text-[11px]">Issue comment template</Label>
+                      <textarea
+                        id={`run-oncomplete-comment-${run.id}`}
+                        className="min-h-[76px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={runOnCompleteDraft.commentBody}
+                        onChange={(event) => setRunOnCompleteDraft((current) => ({ ...current, commentBody: event.target.value }))}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <div className="space-y-2 rounded-md border border-border p-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`run-oncomplete-create-issue-${run.id}`}
+                          checked={runOnCompleteDraft.createIssue}
+                          onCheckedChange={(checked) => setRunOnCompleteDraft((current) => ({ ...current, createIssue: checked === true }))}
+                        />
+                        <Label htmlFor={`run-oncomplete-create-issue-${run.id}`} className="text-[11px]">Create follow-up issue</Label>
+                      </div>
+
+                      {runOnCompleteDraft.createIssue && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label htmlFor={`run-oncomplete-title-${run.id}`} className="text-[11px]">Follow-up title</Label>
+                            <Input
+                              id={`run-oncomplete-title-${run.id}`}
+                              value={runOnCompleteDraft.createIssueTitle}
+                              onChange={(event) => setRunOnCompleteDraft((current) => ({ ...current, createIssueTitle: event.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label htmlFor={`run-oncomplete-description-${run.id}`} className="text-[11px]">Follow-up description</Label>
+                            <textarea
+                              id={`run-oncomplete-description-${run.id}`}
+                              className="min-h-[76px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={runOnCompleteDraft.createIssueDescription}
+                              onChange={(event) => setRunOnCompleteDraft((current) => ({ ...current, createIssueDescription: event.target.value }))}
+                              spellCheck={false}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`run-oncomplete-priority-${run.id}`} className="text-[11px]">Priority</Label>
+                            <select
+                              id={`run-oncomplete-priority-${run.id}`}
+                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                              value={runOnCompleteDraft.createIssuePriority}
+                              onChange={(event) => setRunOnCompleteDraft((current) => ({
+                                ...current,
+                                createIssuePriority: event.target.value as RunOnCompleteDraft["createIssuePriority"],
+                              }))}
+                            >
+                              <option value="critical">critical</option>
+                              <option value="high">high</option>
+                              <option value="medium">medium</option>
+                              <option value="low">low</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1.5 md:col-span-2">
+                            <Label htmlFor={`run-oncomplete-child-comment-${run.id}`} className="text-[11px]">Follow-up issue comment template</Label>
+                            <textarea
+                              id={`run-oncomplete-child-comment-${run.id}`}
+                              className="min-h-[76px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={runOnCompleteDraft.createIssueCommentBody}
+                              onChange={(event) => setRunOnCompleteDraft((current) => ({ ...current, createIssueCommentBody: event.target.value }))}
+                              spellCheck={false}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">사용 가능: {'{outcome}'}, {'{runId}'}, {'{agentId}'}, {'{issueId}'}, {'{createdIssueIdentifier}'}</p>
+                  </div>
+                )}
               </div>
             )}
             {startTime && (

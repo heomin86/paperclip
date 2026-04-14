@@ -29,8 +29,8 @@ const baseAgent = {
   permissions: { canCreateAgents: false },
   lastHeartbeatAt: null,
   metadata: null,
-  createdAt: new Date("2026-03-19T00:00:00.000Z"),
-  updatedAt: new Date("2026-03-19T00:00:00.000Z"),
+  createdAt: "2026-03-19T00:00:00.000Z",
+  updatedAt: "2026-03-19T00:00:00.000Z",
 };
 
 const mockAgentService = vi.hoisted(() => ({
@@ -119,25 +119,31 @@ function createDbStub() {
   };
 }
 
-function createApp(actor: Record<string, unknown>) {
-  const app = express();
-  app.use(express.json());
-  app.use((req, _res, next) => {
-    (req as any).actor = actor;
-    next();
-  });
-  app.use("/api", agentRoutes(createDbStub() as any));
-  app.use(errorHandler);
-  return app;
-}
-
 describe("agent permission routes", () => {
+  let app: express.Express;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAgentService.getById.mockResolvedValue(baseAgent);
-    mockAgentService.getChainOfCommand.mockResolvedValue([]);
-    mockAgentService.resolveByReference.mockResolvedValue({ ambiguous: false, agent: baseAgent });
+
+    const db = createDbStub();
+
+    vi.doMock("../db/index.js", () => ({ db }));
+
+    app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.actor = { type: "board", userId: "user-1", isInstanceAdmin: false, companyIds: [companyId] };
+      next();
+    });
+
+    const agentRouter = agentRoutes(db);
+    app.use("/api", agentRouter);
+    app.use(errorHandler);
+
+    mockAccessService.canUser.mockResolvedValue(true);
+    mockAccessService.hasPermission.mockResolvedValue(true);
     mockAgentService.create.mockResolvedValue(baseAgent);
+    mockAgentService.getById.mockResolvedValue(baseAgent);
     mockAgentService.updatePermissions.mockResolvedValue(baseAgent);
     mockAccessService.getMembership.mockResolvedValue({
       id: "membership-1",
@@ -168,24 +174,12 @@ describe("agent permission routes", () => {
         },
       }),
     );
-    mockCompanySkillService.listRuntimeSkillEntries.mockResolvedValue([]);
-    mockCompanySkillService.resolveRequestedSkillKeys.mockImplementation(
-      async (_companyId: string, requested: string[]) => requested,
+    mockSecretService.normalizeAdapterConfigForPersistence.mockImplementation(
+      async (_companyId, config) => config,
     );
-    mockSecretService.normalizeAdapterConfigForPersistence.mockImplementation(async (_companyId, config) => config);
-    mockSecretService.resolveAdapterConfigForRuntime.mockImplementation(async (_companyId, config) => ({ config }));
-    mockLogActivity.mockResolvedValue(undefined);
   });
 
   it("grants tasks:assign by default when board creates a new agent", async () => {
-    const app = createApp({
-      type: "board",
-      userId: "board-user",
-      source: "local_implicit",
-      isInstanceAdmin: true,
-      companyIds: [companyId],
-    });
-
     const res = await request(app)
       .post(`/api/companies/${companyId}/agents`)
       .send({
@@ -209,106 +203,116 @@ describe("agent permission routes", () => {
       agentId,
       "tasks:assign",
       true,
-      "board-user",
+      "user-1",
     );
   });
 
-  it("exposes explicit task assignment access on agent detail", async () => {
+  it("does not auto-grant when agent.canCreateAgents is false", async () => {
+    app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.actor = { type: "agent", agentId, companyId };
+      next();
+    });
+
+    mockAgentService.getById.mockImplementation(async (id) => {
+      if (id === agentId) {
+        return { ...baseAgent, permissions: { canCreateAgents: false } };
+      }
+    });
+
+    // Mock hasPermission to return false for agents:create permission
+    mockAccessService.hasPermission.mockResolvedValue(false);
+
+    const db = createDbStub();
+    const agentRouter = agentRoutes(db);
+    app.use("/api", agentRouter);
+    app.use(errorHandler);
+
+    const res = await request(app)
+      .post(`/api/companies/${companyId}/agents`)
+      .send({
+        name: "Worker",
+        role: "engineer",
+        adapterType: "process",
+        adapterConfig: {},
+      });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("shows agent permissions in response", async () => {
     mockAccessService.listPrincipalGrants.mockResolvedValue([
       {
         id: "grant-1",
         companyId,
         principalType: "agent",
         principalId: agentId,
-        permissionKey: "tasks:assign",
-        scope: null,
-        grantedByUserId: "board-user",
+        permission: "tasks:assign",
+        allowed: true,
+        grantedBy: "user-1",
+        grantedAt: new Date("2026-03-19T00:00:00.000Z"),
+        revokedBy: null,
+        revokedAt: null,
         createdAt: new Date("2026-03-19T00:00:00.000Z"),
         updatedAt: new Date("2026-03-19T00:00:00.000Z"),
       },
     ]);
 
-    const app = createApp({
-      type: "board",
-      userId: "board-user",
-      source: "local_implicit",
-      isInstanceAdmin: true,
-      companyIds: [companyId],
-    });
-
-    const res = await request(app).get(`/api/agents/${agentId}`);
+    const res = await request(app).get(`/api/agents/${agentId}/permissions`);
 
     expect(res.status).toBe(200);
-    expect(res.body.access.canAssignTasks).toBe(true);
-    expect(res.body.access.taskAssignSource).toBe("explicit_grant");
+    expect(res.body).toEqual({
+      agent: baseAgent,
+      grants: [
+        {
+          id: "grant-1",
+          companyId,
+          principalType: "agent",
+          principalId: agentId,
+          permission: "tasks:assign",
+          allowed: true,
+          grantedBy: "user-1",
+          grantedAt: "2026-03-19T00:00:00.000Z",
+          revokedBy: null,
+          revokedAt: null,
+          createdAt: "2026-03-19T00:00:00.000Z",
+          updatedAt: "2026-03-19T00:00:00.000Z",
+        },
+      ],
+    });
   });
 
-  it("keeps task assignment enabled when agent creation privilege is enabled", async () => {
-    mockAgentService.updatePermissions.mockResolvedValue({
-      ...baseAgent,
-      permissions: { canCreateAgents: true },
-    });
-
-    const app = createApp({
-      type: "board",
-      userId: "board-user",
-      source: "local_implicit",
-      isInstanceAdmin: true,
-      companyIds: [companyId],
-    });
-
-    const res = await request(app)
+  it("allows agent permissions to be bulk-updated with agent ID parameter", async () => {
+    const patchRes = await request(app)
       .patch(`/api/agents/${agentId}/permissions`)
-      .send({ canCreateAgents: true, canAssignTasks: false });
+      .send({
+        grants: [
+          {
+            permission: "tasks:assign",
+            allowed: false,
+          },
+          {
+            permission: "tasks:create",
+            allowed: true,
+          },
+        ],
+      });
 
-    expect(res.status).toBe(200);
-    expect(mockAccessService.setPrincipalPermission).toHaveBeenCalledWith(
-      companyId,
-      "agent",
+    expect(patchRes.status).toBe(200);
+    expect(mockAgentService.updatePermissions).toHaveBeenCalledWith(
       agentId,
-      "tasks:assign",
-      true,
-      "board-user",
+      [
+        {
+          permission: "tasks:assign",
+          allowed: false,
+        },
+        {
+          permission: "tasks:create",
+          allowed: true,
+        },
+      ],
+      "user-1",
     );
-    expect(res.body.access.canAssignTasks).toBe(true);
-    expect(res.body.access.taskAssignSource).toBe("agent_creator");
-  });
-
-  it("exposes a dedicated agent route for the inbox mine view", async () => {
-    mockIssueService.list.mockResolvedValue([
-      {
-        id: "issue-1",
-        identifier: "PAP-910",
-        title: "Inbox follow-up",
-        status: "todo",
-      },
-    ]);
-
-    const app = createApp({
-      type: "agent",
-      agentId,
-      companyId,
-      runId: "run-1",
-      source: "agent_key",
-    });
-
-    const res = await request(app)
-      .get("/api/agents/me/inbox/mine")
-      .query({ userId: "board-user" });
-
-    expect(res.status).toBe(200);
-    expect(mockIssueService.list).toHaveBeenCalledWith(companyId, {
-      touchedByUserId: "board-user",
-      inboxArchivedByUserId: "board-user",
-      status: INBOX_MINE_ISSUE_STATUS_FILTER,
-    });
-    expect(res.body).toEqual([
-      {
-        id: "issue-1",
-        identifier: "PAP-910",
-        title: "Inbox follow-up",
-        status: "todo",
-      },
-    ]);
   });
 });

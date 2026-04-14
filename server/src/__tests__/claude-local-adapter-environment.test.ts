@@ -10,7 +10,7 @@ afterEach(() => {
   if (ORIGINAL_ANTHROPIC === undefined) {
     delete process.env.ANTHROPIC_API_KEY;
   } else {
-    process.env.ANTHROPIC_API_KEY = ORIGINAL_ANTHROPIC;
+    process.env.ANTHROPIC_API_KEY=ORIGINAL_ANTHROPIC;
   }
 });
 

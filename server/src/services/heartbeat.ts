@@ -285,6 +285,30 @@ async function withAgentStartLock<T>(agentId: string, fn: () => Promise<T>) {
   }
 }
 
+export type HeartbeatCompletionOutcome = "succeeded" | "failed" | "cancelled" | "timed_out";
+
+export interface HeartbeatOnCompleteCreateIssueConfig {
+  title: string | null;
+  description: string | null;
+  status: "backlog" | "todo" | "in_progress" | "in_review" | "blocked" | "done" | "cancelled" | null;
+  priority: "critical" | "high" | "medium" | "low" | null;
+  assignToAgentId: string | null;
+  commentBody: string | null;
+}
+
+export interface HeartbeatOnCompleteConfig {
+  agentId: string | null;
+  source: "timer" | "assignment" | "on_demand" | "automation" | null;
+  triggerDetail: "manual" | "ping" | "callback" | "system" | null;
+  reason: string | null;
+  payload: Record<string, unknown> | null;
+  contextSnapshot: Record<string, unknown> | null;
+  commentBody: string | null;
+  issueStatus: "backlog" | "todo" | "in_progress" | "in_review" | "blocked" | "done" | "cancelled" | null;
+  createIssue: HeartbeatOnCompleteCreateIssueConfig | null;
+  onlyOn: HeartbeatCompletionOutcome[] | null;
+}
+
 interface WakeupOptions {
   source?: "timer" | "assignment" | "on_demand" | "automation";
   triggerDetail?: "manual" | "ping" | "callback" | "system";
@@ -294,6 +318,8 @@ interface WakeupOptions {
   requestedByActorType?: "user" | "agent" | "system";
   requestedByActorId?: string | null;
   contextSnapshot?: Record<string, unknown>;
+  silentCompletion?: boolean;
+  onComplete?: Partial<HeartbeatOnCompleteConfig> | null;
 }
 
 type UsageTotals = {
@@ -650,6 +676,122 @@ export function deriveTaskKeyWithHeartbeatFallback(
   if (wakeSource === "timer") return HEARTBEAT_TASK_KEY;
 
   return null;
+}
+
+function normalizeHeartbeatCompletionOnlyOn(value: unknown): HeartbeatCompletionOutcome[] | null {
+  if (!Array.isArray(value)) return null;
+  const normalized = value.filter(
+    (entry): entry is HeartbeatCompletionOutcome =>
+      entry === "succeeded" || entry === "failed" || entry === "cancelled" || entry === "timed_out",
+  );
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : null;
+}
+
+function normalizeHeartbeatOnCompleteIssueStatus(value: unknown): HeartbeatOnCompleteConfig["issueStatus"] {
+  return value === "backlog" ||
+    value === "todo" ||
+    value === "in_progress" ||
+    value === "in_review" ||
+    value === "blocked" ||
+    value === "done" ||
+    value === "cancelled"
+    ? value
+    : null;
+}
+
+function normalizeHeartbeatOnCompleteIssuePriority(value: unknown): HeartbeatOnCompleteCreateIssueConfig["priority"] {
+  return value === "critical" || value === "high" || value === "medium" || value === "low" ? value : null;
+}
+
+export function resolveHeartbeatOnCompleteCreateIssueConfig(value: unknown): HeartbeatOnCompleteCreateIssueConfig | null {
+  const parsed = parseObject(value);
+  if (Object.keys(parsed).length === 0) return null;
+  return {
+    title: readNonEmptyString(parsed.title),
+    description: readNonEmptyString(parsed.description),
+    status: normalizeHeartbeatOnCompleteIssueStatus(parsed.status),
+    priority: normalizeHeartbeatOnCompleteIssuePriority(parsed.priority),
+    assignToAgentId: readNonEmptyString(parsed.assignToAgentId),
+    commentBody: readNonEmptyString(parsed.commentBody),
+  };
+}
+
+export function resolveHeartbeatOnCompleteConfig(
+  contextSnapshot: Record<string, unknown> | null | undefined,
+): { silentCompletion: boolean; onComplete: HeartbeatOnCompleteConfig | null } {
+  const context = parseObject(contextSnapshot);
+  const payload = parseObject(context.payload);
+  const silentCompletion = context.silentCompletion === true || payload.silentCompletion === true;
+
+  const rawOnComplete = parseObject(context.onComplete);
+  const legacyOnComplete = rawOnComplete && Object.keys(rawOnComplete).length > 0 ? rawOnComplete : parseObject(payload.onComplete);
+  if (Object.keys(legacyOnComplete).length === 0) {
+    return {
+      silentCompletion,
+      onComplete: null,
+    };
+  }
+
+  const payloadConfig = parseObject(legacyOnComplete.payload);
+  const contextConfig = parseObject(legacyOnComplete.contextSnapshot);
+
+  return {
+    silentCompletion,
+    onComplete: {
+      agentId: readNonEmptyString(legacyOnComplete.agentId),
+      source:
+        (readNonEmptyString(legacyOnComplete.source) as HeartbeatOnCompleteConfig["source"]) ?? null,
+      triggerDetail:
+        (readNonEmptyString(legacyOnComplete.triggerDetail) as HeartbeatOnCompleteConfig["triggerDetail"]) ?? null,
+      reason: readNonEmptyString(legacyOnComplete.reason),
+      payload: Object.keys(payloadConfig).length > 0 ? payloadConfig : null,
+      contextSnapshot: Object.keys(contextConfig).length > 0 ? contextConfig : null,
+      commentBody: readNonEmptyString(legacyOnComplete.commentBody),
+      issueStatus: normalizeHeartbeatOnCompleteIssueStatus(legacyOnComplete.issueStatus),
+      createIssue: resolveHeartbeatOnCompleteCreateIssueConfig(legacyOnComplete.createIssue),
+      onlyOn: normalizeHeartbeatCompletionOnlyOn(legacyOnComplete.onlyOn),
+    },
+  };
+}
+
+export function shouldTriggerHeartbeatOnComplete(
+  config: HeartbeatOnCompleteConfig | null | undefined,
+  outcome: HeartbeatCompletionOutcome,
+) {
+  if (!config) return false;
+  if (!config.onlyOn || config.onlyOn.length === 0) return true;
+  return config.onlyOn.includes(outcome);
+}
+
+export function shouldApplyHeartbeatOnCompleteActions(
+  config: HeartbeatOnCompleteConfig | null | undefined,
+  outcome: HeartbeatCompletionOutcome,
+) {
+  if (!shouldTriggerHeartbeatOnComplete(config, outcome)) return false;
+  return Boolean(config?.createIssue?.title || config?.issueStatus || config?.commentBody);
+}
+
+export function renderHeartbeatOnCompleteComment(
+  template: string | null | undefined,
+  input: {
+    outcome: HeartbeatCompletionOutcome;
+    runId: string;
+    agentId: string;
+    issueId: string | null;
+    createdIssueId?: string | null;
+    createdIssueIdentifier?: string | null;
+  },
+) {
+  const raw = typeof template === "string" ? template : "";
+  const rendered = raw
+    .replaceAll("{outcome}", input.outcome)
+    .replaceAll("{runId}", input.runId)
+    .replaceAll("{agentId}", input.agentId)
+    .replaceAll("{issueId}", input.issueId ?? "")
+    .replaceAll("{createdIssueId}", input.createdIssueId ?? "")
+    .replaceAll("{createdIssueIdentifier}", input.createdIssueIdentifier ?? "");
+  const trimmed = rendered.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function shouldResetTaskSessionForWake(
@@ -2080,6 +2222,7 @@ export function heartbeatService(db: Db) {
 
     const runtime = await ensureRuntimeState(agent);
     const context = parseObject(run.contextSnapshot);
+    const completionConfig = resolveHeartbeatOnCompleteConfig(context);
     const taskKey = deriveTaskKeyWithHeartbeatFallback(context, null);
     const sessionCodec = getAdapterSessionCodec(agent.adapterType);
     const issueId = readNonEmptyString(context.issueId);
@@ -2607,7 +2750,11 @@ export function heartbeatService(db: Db) {
           })
           .where(eq(heartbeatRuns.id, run.id));
       }
-      if (issueId && (executionWorkspace.created || runtimeServices.some((service) => !service.reused))) {
+      if (
+        !completionConfig.silentCompletion &&
+        issueId &&
+        (executionWorkspace.created || runtimeServices.some((service) => !service.reused))
+      ) {
         try {
           await issuesSvc.addComment(
             issueId,
@@ -2697,7 +2844,7 @@ export function heartbeatService(db: Db) {
             updatedAt: new Date(),
           })
           .where(eq(heartbeatRuns.id, run.id));
-        if (issueId) {
+        if (!completionConfig.silentCompletion && issueId) {
           try {
             await issuesSvc.addComment(
               issueId,
@@ -2852,6 +2999,184 @@ export function heartbeatService(db: Db) {
               sessionDisplayId: nextSessionState.displayId,
               lastRunId: finalizedRun.id,
               lastError: outcome === "succeeded" ? null : (adapterResult.errorMessage ?? "run_failed"),
+            });
+          }
+        }
+
+        let createdIssue: Awaited<ReturnType<typeof issuesSvc.create>> | null = null;
+        const shouldApplyOnCompleteActions = shouldApplyHeartbeatOnCompleteActions(
+          completionConfig.onComplete,
+          outcome,
+        );
+
+        if (shouldApplyOnCompleteActions && completionConfig.onComplete?.createIssue?.title) {
+          const createIssueConfig = completionConfig.onComplete.createIssue;
+          try {
+            createdIssue = await issuesSvc.create(agent.companyId, {
+              title: createIssueConfig.title!,
+              description: createIssueConfig.description,
+              status: createIssueConfig.status ?? "backlog",
+              priority: createIssueConfig.priority ?? "medium",
+              assigneeAgentId: createIssueConfig.assignToAgentId,
+              projectId: executionProjectId,
+              parentId: issueId,
+              requestDepth: 0,
+              inheritExecutionWorkspaceFromIssueId: issueId,
+              createdByAgentId: agent.id,
+              createdByUserId: null,
+            });
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.create_issue",
+              stream: "system",
+              level: "info",
+              message: `created follow-up issue ${createdIssue.identifier ?? createdIssue.id}`,
+              payload: {
+                issueId: createdIssue.id,
+                identifier: createdIssue.identifier,
+              },
+            });
+
+            if (createIssueConfig.commentBody) {
+              const childCommentBody = renderHeartbeatOnCompleteComment(createIssueConfig.commentBody, {
+                outcome,
+                runId: finalizedRun.id,
+                agentId: agent.id,
+                issueId,
+                createdIssueId: createdIssue.id,
+                createdIssueIdentifier: createdIssue.identifier ?? null,
+              });
+              if (childCommentBody) {
+                await issuesSvc.addComment(createdIssue.id, childCommentBody, { agentId: agent.id });
+              }
+            }
+          } catch (err) {
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.create_issue_error",
+              stream: "system",
+              level: "warn",
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        if (shouldApplyOnCompleteActions && completionConfig.onComplete?.issueStatus && issueId) {
+          try {
+            const updatedIssue = await issuesSvc.update(issueId, { status: completionConfig.onComplete.issueStatus });
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.issue_status",
+              stream: "system",
+              level: "info",
+              message: updatedIssue
+                ? `updated issue ${issueId} status to ${completionConfig.onComplete.issueStatus}`
+                : `issue ${issueId} was not found for onComplete status update`,
+              payload: {
+                issueId,
+                status: completionConfig.onComplete.issueStatus,
+              },
+            });
+          } catch (err) {
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.issue_status_error",
+              stream: "system",
+              level: "warn",
+              message: err instanceof Error ? err.message : String(err),
+              payload: {
+                issueId,
+                status: completionConfig.onComplete.issueStatus,
+              },
+            });
+          }
+        }
+
+        if (shouldApplyOnCompleteActions && completionConfig.onComplete?.commentBody && issueId) {
+          const commentBody = renderHeartbeatOnCompleteComment(completionConfig.onComplete.commentBody, {
+            outcome,
+            runId: finalizedRun.id,
+            agentId: agent.id,
+            issueId,
+            createdIssueId: createdIssue?.id ?? null,
+            createdIssueIdentifier: createdIssue?.identifier ?? null,
+          });
+          if (commentBody) {
+            try {
+              const comment = await issuesSvc.addComment(issueId, commentBody, { agentId: agent.id });
+              await appendRunEvent(finalizedRun, seq++, {
+                eventType: "on_complete.comment",
+                stream: "system",
+                level: "info",
+                message: `posted onComplete comment to issue ${issueId}`,
+                payload: {
+                  issueId,
+                  commentId: comment.id,
+                },
+              });
+            } catch (err) {
+              await appendRunEvent(finalizedRun, seq++, {
+                eventType: "on_complete.comment_error",
+                stream: "system",
+                level: "warn",
+                message: err instanceof Error ? err.message : String(err),
+                payload: {
+                  issueId,
+                },
+              });
+            }
+          }
+        }
+
+        if (shouldTriggerHeartbeatOnComplete(completionConfig.onComplete, outcome)) {
+          const onComplete = completionConfig.onComplete!;
+          const followupContext = {
+            ...(onComplete.contextSnapshot ?? {}),
+            parentRunId: finalizedRun.id,
+            parentAgentId: agent.id,
+            parentOutcome: outcome,
+            issueId: readNonEmptyString(onComplete.contextSnapshot?.issueId) ?? issueId,
+            projectId: readNonEmptyString(onComplete.contextSnapshot?.projectId) ?? executionProjectId,
+            taskKey: readNonEmptyString(onComplete.contextSnapshot?.taskKey) ?? taskKey,
+            triggeredByOnComplete: true,
+          };
+          const followupSource = onComplete.source ?? "automation";
+          const followupTriggerDetail = onComplete.triggerDetail ?? "system";
+          const followupReason = onComplete.reason ?? `heartbeat_on_complete:${outcome}`;
+          const followupAgentId = onComplete.agentId ?? agent.id;
+          try {
+            const followupRun = await enqueueWakeup(followupAgentId, {
+              source: followupSource,
+              triggerDetail: followupTriggerDetail,
+              reason: followupReason,
+              payload: onComplete.payload,
+              contextSnapshot: followupContext,
+              requestedByActorType: "system",
+              requestedByActorId: finalizedRun.id,
+              idempotencyKey: `on_complete:${finalizedRun.id}:${outcome}:${followupAgentId}`,
+            });
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.queued",
+              stream: "system",
+              level: "info",
+              message: followupRun
+                ? `queued onComplete wake for agent ${followupAgentId}`
+                : `skipped onComplete wake for agent ${followupAgentId}`,
+              payload: {
+                followupAgentId,
+                followupRunId: followupRun?.id ?? null,
+                outcome,
+                source: followupSource,
+                triggerDetail: followupTriggerDetail,
+                reason: followupReason,
+              },
+            });
+          } catch (err) {
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "on_complete.error",
+              stream: "system",
+              level: "warn",
+              message: err instanceof Error ? err.message : String(err),
+              payload: {
+                followupAgentId,
+                outcome,
+              },
             });
           }
         }
@@ -3116,6 +3441,12 @@ export function heartbeatService(db: Db) {
     const source = opts.source ?? "on_demand";
     const triggerDetail = opts.triggerDetail ?? null;
     const contextSnapshot: Record<string, unknown> = { ...(opts.contextSnapshot ?? {}) };
+    if (opts.silentCompletion === true) {
+      contextSnapshot.silentCompletion = true;
+    }
+    if (opts.onComplete) {
+      contextSnapshot.onComplete = opts.onComplete;
+    }
     const reason = opts.reason ?? null;
     const payload = opts.payload ?? null;
     const {
