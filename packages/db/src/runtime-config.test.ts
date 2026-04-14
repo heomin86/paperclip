@@ -47,19 +47,20 @@ describe("resolveDatabaseTarget", () => {
     fs.mkdirSync(projectDir, { recursive: true });
     process.chdir(projectDir);
     delete process.env.PAPERCLIP_CONFIG;
+    delete process.env.DATABASE_URL; // Clear environment DATABASE_URL
     writeJson(path.join(projectDir, ".paperclip", "config.json"), {
       database: { mode: "embedded-postgres", embeddedPostgresPort: 54329 },
     });
     writeText(
       path.join(projectDir, ".paperclip", ".env"),
-      'DATABASE_URL="postgres://file-user:file-pass@db.example.com:6543/paperclip"\n',
+      'DATABASE_URL="postgres://file-user:***@db.example.com:6543/paperclip"\n',
     );
 
     const target = resolveDatabaseTarget();
 
     expect(target).toMatchObject({
       mode: "postgres",
-      connectionString: "postgres://file-user:file-pass@db.example.com:6543/paperclip",
+      connectionString: "postgres://file-user:***@db.example.com:6543/paperclip",
       source: "paperclip-env",
     });
   });
@@ -68,10 +69,11 @@ describe("resolveDatabaseTarget", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
     const configPath = path.join(tempDir, "instance", "config.json");
     process.env.PAPERCLIP_CONFIG = configPath;
+    delete process.env.DATABASE_URL; // Clear environment DATABASE_URL
     writeJson(configPath, {
       database: {
         mode: "postgres",
-        connectionString: "postgres://cfg-user:cfg-pass@db.example.com:5432/paperclip",
+        connectionString: "postgres://cfg-user:***@db.example.com:5432/paperclip",
       },
     });
 
@@ -79,7 +81,7 @@ describe("resolveDatabaseTarget", () => {
 
     expect(target).toMatchObject({
       mode: "postgres",
-      connectionString: "postgres://cfg-user:cfg-pass@db.example.com:5432/paperclip",
+      connectionString: "postgres://cfg-user:***@db.example.com:5432/paperclip",
       source: "config.database.connectionString",
     });
   });
@@ -88,6 +90,7 @@ describe("resolveDatabaseTarget", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
     const configPath = path.join(tempDir, "instance", "config.json");
     process.env.PAPERCLIP_CONFIG = configPath;
+    delete process.env.DATABASE_URL; // Clear environment DATABASE_URL
     writeJson(configPath, {
       database: {
         mode: "embedded-postgres",

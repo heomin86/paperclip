@@ -38,6 +38,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const leasedRunIds = new Set<string>();
+const originalDatabaseUrl = process.env.DATABASE_URL;
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
@@ -153,7 +154,12 @@ afterEach(async () => {
   delete process.env.PAPERCLIP_HOME;
   delete process.env.PAPERCLIP_INSTANCE_ID;
   delete process.env.PAPERCLIP_WORKTREES_DIR;
-  delete process.env.DATABASE_URL;
+  // Restore original DATABASE_URL instead of deleting it
+  if (originalDatabaseUrl) {
+    process.env.DATABASE_URL = originalDatabaseUrl;
+  } else {
+    delete process.env.DATABASE_URL;
+  }
   await resetRuntimeServicesForTests();
 });
 
@@ -1180,6 +1186,12 @@ describe("ensureRuntimeServicesForRun", () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
 
     await expect(fetch(services[0]!.url!)).rejects.toThrow();
+
+    // Clean up environment variables set in this test
+    delete process.env.PAPERCLIP_CONFIG;
+    delete process.env.PAPERCLIP_HOME;
+    delete process.env.PAPERCLIP_INSTANCE_ID;
+    delete process.env.DATABASE_URL;
   });
 
   it("does not stop services in sibling directories when matching by workspace cwd", async () => {

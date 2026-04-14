@@ -327,6 +327,13 @@ export const LIVE_EVENT_TYPES = [
   "plugin.ui.updated",
   "plugin.worker.crashed",
   "plugin.worker.restarted",
+  "issue.activity.logged",
+  "issue.deliverable.added",
+  "issue.deliverable.updated",
+  "subagent.spawned",
+  "subagent.status_changed",
+  "subagent.completed",
+  "subagent.failed",
 ] as const;
 export type LiveEventType = (typeof LIVE_EVENT_TYPES)[number];
 

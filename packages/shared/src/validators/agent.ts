@@ -101,12 +101,36 @@ export const agentMineInboxQuerySchema = z.object({
 
 export type AgentMineInboxQuery = z.infer<typeof agentMineInboxQuerySchema>;
 
+const wakeAgentOnCompleteCreateIssueSchema = z.object({
+  title: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  status: z.enum(["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]).optional().nullable(),
+  priority: z.enum(["critical", "high", "medium", "low"]).optional().nullable(),
+  assignToAgentId: z.string().trim().min(1).optional().nullable(),
+  commentBody: z.string().optional().nullable(),
+});
+
+const wakeAgentOnCompleteSchema = z.object({
+  agentId: z.string().trim().min(1).optional().nullable(),
+  source: z.enum(["timer", "assignment", "on_demand", "automation"]).optional().nullable(),
+  triggerDetail: z.enum(["manual", "ping", "callback", "system"]).optional().nullable(),
+  reason: z.string().optional().nullable(),
+  payload: z.record(z.unknown()).optional().nullable(),
+  contextSnapshot: z.record(z.unknown()).optional().nullable(),
+  commentBody: z.string().optional().nullable(),
+  issueStatus: z.enum(["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]).optional().nullable(),
+  createIssue: wakeAgentOnCompleteCreateIssueSchema.optional().nullable(),
+  onlyOn: z.array(z.enum(["succeeded", "failed", "cancelled", "timed_out"])).optional().nullable(),
+});
+
 export const wakeAgentSchema = z.object({
   source: z.enum(["timer", "assignment", "on_demand", "automation"]).optional().default("on_demand"),
   triggerDetail: z.enum(["manual", "ping", "callback", "system"]).optional(),
   reason: z.string().optional().nullable(),
   payload: z.record(z.unknown()).optional().nullable(),
   idempotencyKey: z.string().optional().nullable(),
+  silentCompletion: z.boolean().optional().default(false),
+  onComplete: wakeAgentOnCompleteSchema.optional().nullable(),
   forceFreshSession: z.preprocess(
     (value) => (value === null ? undefined : value),
     z.boolean().optional().default(false),
