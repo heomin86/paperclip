@@ -1251,6 +1251,10 @@ export function agentRoutes(db: Db) {
         redactEventPayload(
           ((normalizedHireInput.metadata ?? agent.metadata ?? {}) as Record<string, unknown>),
         ) ?? {};
+      const requestedPermissions =
+        redactEventPayload(
+          ((normalizedHireInput.permissions ?? agent.permissions ?? {}) as Record<string, unknown>),
+        ) ?? {};
       approval = await approvalsSvc.create(companyId, {
         type: "hire_agent",
         requestedByAgentId: actor.actorType === "agent" ? actor.actorId : null,
@@ -1271,6 +1275,7 @@ export function agentRoutes(db: Db) {
               ? normalizedHireInput.budgetMonthlyCents
               : agent.budgetMonthlyCents,
           desiredSkills: desiredSkillAssignment.desiredSkills,
+          permissions: requestedPermissions,
           metadata: requestedMetadata,
           agentId: agent.id,
           requestedByAgentId: actor.actorType === "agent" ? actor.actorId : null,
@@ -1279,6 +1284,7 @@ export function agentRoutes(db: Db) {
             adapterConfig: requestedAdapterConfig,
             runtimeConfig: requestedRuntimeConfig,
             desiredSkills: desiredSkillAssignment.desiredSkills,
+            permissions: requestedPermissions,
           },
         },
         decisionNote: null,
@@ -1311,6 +1317,7 @@ export function agentRoutes(db: Db) {
         approvalId: approval?.id ?? null,
         issueIds: sourceIssueIds,
         desiredSkills: desiredSkillAssignment.desiredSkills,
+        permissions: normalizedHireInput.permissions ?? agent.permissions ?? {},
       },
     });
 

@@ -73,6 +73,8 @@ export function NewAgent() {
   const [configValues, setConfigValues] = useState<CreateConfigValues>(defaultCreateValues);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<string[]>([]);
   const [roleOpen, setRoleOpen] = useState(false);
+  const [canCreateAgents, setCanCreateAgents] = useState(false);
+  const [canCreateAgentsTouched, setCanCreateAgentsTouched] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const { data: agents } = useQuery({
@@ -100,7 +102,7 @@ export function NewAgent() {
     enabled: Boolean(selectedCompanyId),
   });
 
-  const isFirstAgent = !agents || agents.length === 0;
+  const isFirstAgent = agents !== undefined && agents.length === 0;
   const effectiveRole = isFirstAgent ? "ceo" : role;
 
   useEffect(() => {
@@ -116,6 +118,12 @@ export function NewAgent() {
       if (!title) setTitle("CEO");
     }
   }, [isFirstAgent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!canCreateAgentsTouched) {
+      setCanCreateAgents(effectiveRole === "ceo");
+    }
+  }, [effectiveRole, canCreateAgentsTouched]);
 
   useEffect(() => {
     const requested = presetAdapterType;
@@ -184,6 +192,7 @@ export function NewAgent() {
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(reportsTo ? { reportsTo } : {}),
       ...(selectedSkillKeys.length > 0 ? { desiredSkills: selectedSkillKeys } : {}),
+      permissions: { canCreateAgents },
       adapterType: configValues.adapterType,
       adapterConfig: buildAdapterConfig(),
       runtimeConfig: {
@@ -287,6 +296,46 @@ export function NewAgent() {
           onChange={(patch) => setConfigValues((prev) => ({ ...prev, ...patch }))}
           adapterModels={adapterModels}
         />
+
+        <div className="border-t border-border px-4 py-4">
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-sm font-medium">Permissions</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Turn this on when the agent should be allowed to create or hire sub-agents.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border px-3 py-3 text-sm">
+              <div className="space-y-1">
+                <div>Can create new agents</div>
+                <p className="text-xs text-muted-foreground">
+                  Lets this agent create or hire agents and implicitly assign tasks.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                data-slot="toggle"
+                aria-checked={canCreateAgents}
+                className={cn(
+                  "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0",
+                  canCreateAgents ? "bg-green-600" : "bg-muted",
+                )}
+                onClick={() => {
+                  setCanCreateAgentsTouched(true);
+                  setCanCreateAgents((prev) => !prev);
+                }}
+              >
+                <span
+                  className={cn(
+                    "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
+                    canCreateAgents ? "translate-x-4.5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div className="border-t border-border px-4 py-4">
           <div className="space-y-3">

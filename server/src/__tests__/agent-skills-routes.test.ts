@@ -573,6 +573,40 @@ describe("agent skill routes", () => {
     );
   });
 
+  it("includes requested agent creation permission in hire approvals", async () => {
+    const res = await request(createApp(createDb(true)))
+      .post("/api/companies/company-1/agent-hires")
+      .send({
+        name: "Delegating Agent",
+        role: "engineer",
+        adapterType: "claude_local",
+        adapterConfig: {},
+        permissions: { canCreateAgents: true },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(mockApprovalService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          permissions: { canCreateAgents: true },
+          requestedConfigurationSnapshot: expect.objectContaining({
+            permissions: { canCreateAgents: true },
+          }),
+        }),
+      }),
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "agent.hire_created",
+        details: expect.objectContaining({
+          permissions: { canCreateAgents: true },
+        }),
+      }),
+    );
+  });
+
   it("uses managed AGENTS config in hire approval payloads", async () => {
     const res = await request(createApp(createDb(true)))
       .post("/api/companies/company-1/agent-hires")
